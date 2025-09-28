@@ -77,7 +77,7 @@ class TimesFM_2p5_200M_torch_module(nn.Module):
 
   def load_checkpoint(self, path: str):
     """Loads a PyTorch TimesFM model from a checkpoint."""
-    tensors = load_file(path)
+    tensors = load_file(path, device="cpu")
     self.load_state_dict(tensors)
     self.to(self.device)
 

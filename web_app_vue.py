@@ -401,6 +401,10 @@ _CFG = None
 _LOCK = None
 _FONT_READY = False
 
+# 强制使用 CPU
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
 def _ensure_cn_font():
     global _FONT_READY
     if _FONT_READY:
@@ -424,25 +428,51 @@ def _ensure_model_loaded():
     if _MODEL is None:
         with _LOCK:
             if _MODEL is None:
-                _MODEL = timesfm.TimesFM_2p5_200M_torch()
-                _MODEL.load_checkpoint()
-                # 针对60日K线股票数据优化的配置
-                _CFG = timesfm.ForecastConfig(
-                    max_context=1024,  # 支持最多1024个时间点的历史数据
-                    max_horizon=256,   # 支持最多256个时间点的预测
-                    normalize_inputs=True,  # 标准化输入，对股价数据很重要
-                    use_continuous_quantile_head=True,  # 启用概率预测，提供不确定性估计
-                    force_flip_invariance=False,  # 股票数据有方向性，不强制翻转不变性
-                    infer_is_positive=True,  # 股价通常为正值
-                    fix_quantile_crossing=True,  # 修复分位数交叉问题
-                )
-                _MODEL.compile(_CFG)
+                try:
+                    print("正在加载 TimesFM 模型...")
+                    _MODEL = timesfm.TimesFM_2p5_200M_torch()
+                    print("正在加载模型检查点...")
+                    # 使用项目目录下的模型文件
+                    model_file = os.path.join(os.path.dirname(__file__), "models", "model.safetensors")
+                    if os.path.exists(model_file):
+                        print(f"使用项目目录下的模型: {model_file}")
+                        _MODEL.load_checkpoint(path=model_file)
+                    else:
+                        print("项目目录下未找到模型文件，尝试从 Hugging Face 下载...")
+                        _MODEL.load_checkpoint()
+                    print("正在配置预测参数...")
+                    # 针对60日K线股票数据优化的配置
+                    _CFG = timesfm.ForecastConfig(
+                        max_context=1024,  # 支持最多1024个时间点的历史数据
+                        max_horizon=256,   # 支持最多256个时间点的预测
+                        normalize_inputs=True,  # 标准化输入，对股价数据很重要
+                        use_continuous_quantile_head=True,  # 启用概率预测，提供不确定性估计
+                        force_flip_invariance=False,  # 股票数据有方向性，不强制翻转不变性
+                        infer_is_positive=True,  # 股价通常为正值
+                        fix_quantile_crossing=True,  # 修复分位数交叉问题
+                    )
+                    print("正在编译模型...")
+                    _MODEL.compile(_CFG)
+                    print("✅ TimesFM 模型加载完成")
+                except Exception as e:
+                    print(f"❌ 模型加载失败: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    raise e
 
 def run_forecast(series: np.ndarray, horizon: int):
     _ensure_model_loaded()
-    with _LOCK:
-        point, quant = _MODEL.forecast(horizon=horizon, inputs=[series])
-    return point[0], quant[0]
+    try:
+        with _LOCK:
+            if _MODEL is None or _MODEL.compiled_decode is None:
+                raise RuntimeError("模型未正确加载或编译")
+            point, quant = _MODEL.forecast(horizon=horizon, inputs=[series])
+        return point[0], quant[0]
+    except Exception as e:
+        print(f"预测过程中出错: {e}")
+        import traceback
+        traceback.print_exc()
+        raise e
 
 def plot_chart(history: np.ndarray, pred: np.ndarray, q: np.ndarray):
     _ensure_cn_font()
