@@ -404,7 +404,6 @@ _FONT_READY = False
 # 强制使用 CPU
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
-
 def _ensure_cn_font():
     global _FONT_READY
     if _FONT_READY:
